@@ -8,7 +8,11 @@
             ],
             "env": {
                 "MCP_SERVER_URL": "http://localhost:3988/api/mcp/compliant",
-                "MCP_API_KEY": "your-openbonsai-api-key-here"
+                "MCP_API_KEY": "your-openbonsai-api-key-here",
+                "DEBUG": "false",
+                "MAX_RETRIES": "3",
+                "RETRY_DELAY": "1000",
+                "REQUEST_TIMEOUT": "30000"
             }
         }
     },

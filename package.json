@@ -1,6 +1,6 @@
 {
   "name": "mcp-http-bridge-openbonsai",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "HTTP bridge for OpenBonsai MCP Server - enables Claude Code to communicate with OpenBonsai via HTTP",
   "main": "mcp-http-bridge-openbonsai",
   "bin": {

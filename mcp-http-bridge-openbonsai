@@ -1,100 +1,286 @@
 #!/usr/bin/env node
 
 /**
- * Simple HTTP Bridge for OpenBonsai MCP Server
- * This script acts as a bridge between Claude Code and OpenBonsai's HTTP MCP endpoint
+ * HTTP Bridge for OpenBonsai MCP Server
+ * Bridges stdio JSON-RPC messages to HTTP endpoint for OpenBonsai MCP Server
+ * @version 1.1.0
  */
 
-const http = require('http');
-const { spawn } = require('child_process');
+'use strict';
 
-// Configuration
+// Configuration with validation
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'http://localhost:3988/api/mcp/compliant';
 const MCP_API_KEY = process.env.MCP_API_KEY;
+const DEBUG = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
+const MAX_RETRIES = parseInt(process.env.MAX_RETRIES || '3', 10);
+const RETRY_DELAY = parseInt(process.env.RETRY_DELAY || '1000', 10);
+const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || '30000', 10);
 
+// Validate required configuration
 if (!MCP_API_KEY) {
   console.error('ERROR: MCP_API_KEY environment variable is required');
+  console.error('Please set MCP_API_KEY in your MCP configuration');
   process.exit(1);
 }
 
-// Simple stdio JSON-RPC handler
-function handleStdio() {
-  let buffer = '';
-  
-  process.stdin.on('data', async (chunk) => {
-    buffer += chunk.toString();
-    console.error('Received chunk:', chunk.toString());
-    
-    // Look for newline-terminated JSON messages
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || ''; // Keep incomplete line in buffer
-    
-    for (const line of lines) {
-      if (line.trim()) {
-        try {
-          const request = JSON.parse(line.trim());
-          console.error('Processing request:', request);
-          
-          // Forward request to HTTP endpoint
-          const response = await makeHttpRequest(request);
-          console.error('Got response:', response);
-          
-          // Send response back via stdout
-          process.stdout.write(JSON.stringify(response) + '\n');
-          
-        } catch (e) {
-          console.error('JSON parse error:', e.message);
-          console.error('Line was:', line);
-        }
-      }
-    }
-  });
-  
-  process.stdin.on('end', () => {
-    process.exit(0);
-  });
+// Validate URL format
+try {
+  new URL(MCP_SERVER_URL);
+} catch (error) {
+  console.error(`ERROR: Invalid MCP_SERVER_URL: ${MCP_SERVER_URL}`);
+  console.error('Please provide a valid URL (e.g., http://localhost:3988/api/mcp/compliant)');
+  process.exit(1);
 }
 
-async function makeHttpRequest(request) {
+// Debug logging helper
+function debugLog(...args) {
+  if (DEBUG) {
+    console.error('[DEBUG]', new Date().toISOString(), ...args);
+  }
+}
+
+// Validate JSON-RPC request structure
+function validateJsonRpcRequest(request) {
+  if (!request || typeof request !== 'object') {
+    return 'Request must be an object';
+  }
+  
+  if (request.jsonrpc !== '2.0') {
+    return 'JSON-RPC version must be 2.0';
+  }
+  
+  if (!request.method || typeof request.method !== 'string') {
+    return 'Method must be a non-empty string';
+  }
+  
+  // ID is optional but if present must be string, number, or null
+  if ('id' in request && 
+      request.id !== null && 
+      typeof request.id !== 'string' && 
+      typeof request.id !== 'number') {
+    return 'ID must be string, number, or null';
+  }
+  
+  return null; // Valid
+}
+
+// Create JSON-RPC error response
+function createErrorResponse(code, message, id = null, data = undefined) {
+  const error = {
+    jsonrpc: '2.0',
+    error: {
+      code,
+      message
+    },
+    id
+  };
+  
+  if (data !== undefined) {
+    error.error.data = data;
+  }
+  
+  return error;
+}
+
+// Sleep helper for retry logic
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Make HTTP request with retry logic
+async function makeHttpRequest(request, retryCount = 0) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+  
   try {
-    // Use Node.js built-in fetch (Node 18+)
+    debugLog(`Sending request to ${MCP_SERVER_URL} (attempt ${retryCount + 1}/${MAX_RETRIES})`);
     
     const response = await fetch(MCP_SERVER_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': MCP_API_KEY,
+        'User-Agent': 'mcp-http-bridge-openbonsai/1.1.0'
       },
       body: JSON.stringify(request),
+      signal: controller.signal
     });
 
+    clearTimeout(timeout);
+    
     if (!response.ok) {
-      return {
-        jsonrpc: '2.0',
-        error: {
-          code: -32603,
-          message: `HTTP error: ${response.status} ${response.statusText}`
-        },
-        id: request.id || null,
-      };
+      // Don't retry on client errors (4xx)
+      if (response.status >= 400 && response.status < 500) {
+        debugLog(`HTTP client error: ${response.status} ${response.statusText}`);
+        return createErrorResponse(
+          -32603,
+          `HTTP error: ${response.status} ${response.statusText}`,
+          request.id
+        );
+      }
+      
+      // Retry on server errors (5xx)
+      if (response.status >= 500 && retryCount < MAX_RETRIES - 1) {
+        debugLog(`HTTP server error: ${response.status}, retrying...`);
+        await sleep(RETRY_DELAY * Math.pow(2, retryCount)); // Exponential backoff
+        return makeHttpRequest(request, retryCount + 1);
+      }
+      
+      return createErrorResponse(
+        -32603,
+        `HTTP error: ${response.status} ${response.statusText}`,
+        request.id
+      );
     }
 
     const result = await response.json();
+    debugLog('Response received successfully');
     return result;
     
   } catch (error) {
-    return {
-      jsonrpc: '2.0',
-      error: {
-        code: -32603,
-        message: `Connection error: ${error.message}`
-      },
-      id: request.id || null,
-    };
+    clearTimeout(timeout);
+    
+    // Handle timeout
+    if (error.name === 'AbortError') {
+      debugLog(`Request timeout after ${REQUEST_TIMEOUT}ms`);
+      if (retryCount < MAX_RETRIES - 1) {
+        await sleep(RETRY_DELAY * Math.pow(2, retryCount));
+        return makeHttpRequest(request, retryCount + 1);
+      }
+      return createErrorResponse(
+        -32603,
+        `Request timeout after ${REQUEST_TIMEOUT}ms`,
+        request.id
+      );
+    }
+    
+    // Handle network errors with retry
+    if (retryCount < MAX_RETRIES - 1 && 
+        (error.code === 'ECONNREFUSED' || 
+         error.code === 'ENOTFOUND' || 
+         error.code === 'ETIMEDOUT')) {
+      debugLog(`Network error: ${error.message}, retrying...`);
+      await sleep(RETRY_DELAY * Math.pow(2, retryCount));
+      return makeHttpRequest(request, retryCount + 1);
+    }
+    
+    debugLog(`Connection error: ${error.message}`);
+    return createErrorResponse(
+      -32603,
+      `Connection error: ${error.message}`,
+      request.id
+    );
   }
 }
 
-// Handle stdio communication
+// Handle stdio JSON-RPC communication
+function handleStdio() {
+  let buffer = '';
+  let messageCount = 0;
+  
+  process.stdin.setEncoding('utf8');
+  
+  process.stdin.on('data', async (chunk) => {
+    buffer += chunk;
+    
+    // Process complete messages (newline-delimited)
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || ''; // Keep incomplete line in buffer
+    
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) continue;
+      
+      messageCount++;
+      debugLog(`Processing message #${messageCount}`);
+      
+      try {
+        const request = JSON.parse(trimmedLine);
+        
+        // Validate JSON-RPC request
+        const validationError = validateJsonRpcRequest(request);
+        if (validationError) {
+          debugLog(`Invalid request: ${validationError}`);
+          const errorResponse = createErrorResponse(
+            -32600,
+            `Invalid Request: ${validationError}`,
+            request?.id || null
+          );
+          process.stdout.write(JSON.stringify(errorResponse) + '\n');
+          continue;
+        }
+        
+        debugLog(`Valid request: ${request.method}`);
+        
+        // Forward request to HTTP endpoint
+        const response = await makeHttpRequest(request);
+        
+        // Send response back via stdout
+        process.stdout.write(JSON.stringify(response) + '\n');
+        
+      } catch (error) {
+        // JSON parse error
+        if (error instanceof SyntaxError) {
+          debugLog(`JSON parse error: ${error.message}`);
+          const errorResponse = createErrorResponse(
+            -32700,
+            'Parse error: Invalid JSON',
+            null
+          );
+          process.stdout.write(JSON.stringify(errorResponse) + '\n');
+        } else {
+          // Unexpected error
+          console.error('Unexpected error:', error);
+          const errorResponse = createErrorResponse(
+            -32603,
+            `Internal error: ${error.message}`,
+            null
+          );
+          process.stdout.write(JSON.stringify(errorResponse) + '\n');
+        }
+      }
+    }
+  });
+  
+  process.stdin.on('end', () => {
+    debugLog('Input stream ended, shutting down');
+    process.exit(0);
+  });
+  
+  process.stdin.on('error', (error) => {
+    console.error('Input stream error:', error);
+    process.exit(1);
+  });
+}
+
+// Handle process signals gracefully
+process.on('SIGTERM', () => {
+  debugLog('Received SIGTERM, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  debugLog('Received SIGINT, shutting down gracefully');
+  process.exit(0);
+});
+
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+// Start the bridge
+debugLog('OpenBonsai MCP HTTP Bridge starting...');
+debugLog(`Server URL: ${MCP_SERVER_URL}`);
+debugLog(`Retry configuration: ${MAX_RETRIES} retries with ${RETRY_DELAY}ms initial delay`);
+debugLog(`Request timeout: ${REQUEST_TIMEOUT}ms`);
+
 handleStdio();
 
-console.error('OpenBonsai MCP HTTP Bridge started');
+console.error('OpenBonsai MCP HTTP Bridge v1.1.0 started');

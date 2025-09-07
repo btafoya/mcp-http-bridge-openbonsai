@@ -9,10 +9,15 @@ This package provides a stdio-to-HTTP bridge that allows MCP (Model Context Prot
 ## Features
 
 - 🔄 Bidirectional JSON-RPC message translation
-- 🔐 Secure API key authentication
-- 📝 Debug logging to stderr (doesn't interfere with JSON-RPC)
+- 🔐 Secure API key authentication with validation
+- 📝 Enhanced debug logging with timestamp and message tracking
 - ⚡ Native Node.js 18+ fetch API (no external dependencies)
-- 🛡️ Robust error handling with proper JSON-RPC error responses
+- 🛡️ Comprehensive error handling with JSON-RPC 2.0 compliance
+- 🔁 Automatic retry logic with exponential backoff for network failures
+- ⏱️ Configurable request timeout protection
+- ✅ Input validation and sanitization for all requests
+- 🚦 Graceful shutdown handling (SIGTERM/SIGINT)
+- 🎯 Smart retry strategy (retries on 5xx and network errors, not on 4xx)
 
 ## Requirements
 
@@ -36,11 +41,24 @@ npm install mcp-http-bridge-openbonsai
 
 ## Configuration
 
-Set the following environment variables:
+The bridge accepts the following environment variables, passed directly through the MCP configuration:
 
-- `MCP_API_KEY` (required): Your OpenBonsai API key
-- `MCP_SERVER_URL` (optional): OpenBonsai MCP endpoint URL
+### Required
+- `MCP_API_KEY`: Your OpenBonsai API key
+
+### Optional
+- `MCP_SERVER_URL`: OpenBonsai MCP endpoint URL
   - Default: `http://localhost:3988/api/mcp/compliant`
+- `DEBUG`: Enable debug logging (`true` or `1`)
+  - Default: `false`
+- `MAX_RETRIES`: Maximum number of retry attempts for failed requests
+  - Default: `3`
+- `RETRY_DELAY`: Initial delay in milliseconds between retries (uses exponential backoff)
+  - Default: `1000` (1 second)
+- `REQUEST_TIMEOUT`: Request timeout in milliseconds
+  - Default: `30000` (30 seconds)
+
+Note: These are passed directly in the MCP configuration, not through `.env` files.
 
 ## Usage
 
@@ -74,7 +92,10 @@ Add this to your Claude Code MCP settings. The package will be automatically dow
       ],
       "env": {
         "MCP_SERVER_URL": "http://localhost:3988/api/mcp/compliant",
-        "MCP_API_KEY": "your-api-key-here"
+        "MCP_API_KEY": "your-api-key-here",
+        "DEBUG": "false",
+        "MAX_RETRIES": "3",
+        "REQUEST_TIMEOUT": "30000"
       }
     }
   }
@@ -234,6 +255,21 @@ For issues and questions:
 - OpenBonsai Documentation: [Official Docs](https://openbonsai.com/docs)
 
 ## Changelog
+
+### 1.1.0
+- Enhanced error handling with proper JSON-RPC 2.0 error codes
+- Added automatic retry logic with exponential backoff
+- Implemented request timeout protection
+- Added comprehensive input validation
+- Enhanced debug logging with timestamps and message counting
+- Added graceful shutdown handling (SIGTERM/SIGINT)
+- Improved error messages with more context
+- Added configurable retry and timeout settings
+- Smart retry strategy (retry on 5xx and network errors, not on 4xx)
+
+### 1.0.1
+- Fixed npm package configuration
+- Updated documentation
 
 ### 1.0.0
 - Initial release
