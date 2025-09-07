@@ -1,0 +1,38 @@
+{
+  "name": "mcp-http-bridge-openbonsai",
+  "version": "1.0.0",
+  "description": "HTTP bridge for OpenBonsai MCP Server - enables Claude Code to communicate with OpenBonsai via HTTP",
+  "main": "mcp-http-bridge-openbonsai",
+  "bin": {
+    "mcp-http-bridge-openbonsai": "./mcp-http-bridge-openbonsai"
+  },
+  "scripts": {
+    "start": "node mcp-http-bridge-openbonsai",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "openbonsai",
+    "claude",
+    "claude-code",
+    "http-bridge",
+    "json-rpc",
+    "ai",
+    "llm",
+    "stdio"
+  ],
+  "author": "btafoya",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/btafoya/mcp-http-bridge-openbonsai.git"
+  },
+  "bugs": {
+    "url": "https://github.com/btafoya/mcp-http-bridge-openbonsai/issues"
+  },
+  "homepage": "https://github.com/btafoya/mcp-http-bridge-openbonsai#readme"
+}

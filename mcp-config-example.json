@@ -1,0 +1,28 @@
+{
+    "mcpServers": {
+        "openbonsai": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "mcp-http-bridge-openbonsai@latest"
+            ],
+            "env": {
+                "MCP_SERVER_URL": "http://localhost:3988/api/mcp/compliant",
+                "MCP_API_KEY": "your-openbonsai-api-key-here"
+            }
+        }
+    },
+    "_comments": {
+        "description": "This configuration uses npx to dynamically download and run the latest version",
+        "npx_flag": "The -y flag automatically confirms installation without prompting",
+        "version": "Use @latest for auto-updates or specify version like @1.0.0 for stability",
+        "env_vars": {
+            "MCP_SERVER_URL": "Your OpenBonsai server endpoint",
+            "MCP_API_KEY": "Your OpenBonsai API key (keep this secret!)"
+        },
+        "alternatives": {
+            "specific_version": "mcp-http-bridge-openbonsai@1.0.0",
+            "custom_server": "https://your-server.com/api/mcp/compliant"
+        }
+    }
+}

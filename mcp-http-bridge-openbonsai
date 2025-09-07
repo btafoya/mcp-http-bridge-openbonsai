@@ -1,0 +1,100 @@
+#!/usr/bin/env node
+
+/**
+ * Simple HTTP Bridge for OpenBonsai MCP Server
+ * This script acts as a bridge between Claude Code and OpenBonsai's HTTP MCP endpoint
+ */
+
+const http = require('http');
+const { spawn } = require('child_process');
+
+// Configuration
+const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'http://localhost:3988/api/mcp/compliant';
+const MCP_API_KEY = process.env.MCP_API_KEY;
+
+if (!MCP_API_KEY) {
+  console.error('ERROR: MCP_API_KEY environment variable is required');
+  process.exit(1);
+}
+
+// Simple stdio JSON-RPC handler
+function handleStdio() {
+  let buffer = '';
+  
+  process.stdin.on('data', async (chunk) => {
+    buffer += chunk.toString();
+    console.error('Received chunk:', chunk.toString());
+    
+    // Look for newline-terminated JSON messages
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || ''; // Keep incomplete line in buffer
+    
+    for (const line of lines) {
+      if (line.trim()) {
+        try {
+          const request = JSON.parse(line.trim());
+          console.error('Processing request:', request);
+          
+          // Forward request to HTTP endpoint
+          const response = await makeHttpRequest(request);
+          console.error('Got response:', response);
+          
+          // Send response back via stdout
+          process.stdout.write(JSON.stringify(response) + '\n');
+          
+        } catch (e) {
+          console.error('JSON parse error:', e.message);
+          console.error('Line was:', line);
+        }
+      }
+    }
+  });
+  
+  process.stdin.on('end', () => {
+    process.exit(0);
+  });
+}
+
+async function makeHttpRequest(request) {
+  try {
+    // Use Node.js built-in fetch (Node 18+)
+    
+    const response = await fetch(MCP_SERVER_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': MCP_API_KEY,
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      return {
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: `HTTP error: ${response.status} ${response.statusText}`
+        },
+        id: request.id || null,
+      };
+    }
+
+    const result = await response.json();
+    return result;
+    
+  } catch (error) {
+    return {
+      jsonrpc: '2.0',
+      error: {
+        code: -32603,
+        message: `Connection error: ${error.message}`
+      },
+      id: request.id || null,
+    };
+  }
+}
+
+// Handle stdio communication
+handleStdio();
+
+console.error('OpenBonsai MCP HTTP Bridge started');

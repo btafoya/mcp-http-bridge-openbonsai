@@ -1,0 +1,15 @@
+{
+    "mcpServers": {
+        "openbonsai": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "mcp-http-bridge-openbonsai@latest"
+            ],
+            "env": {
+                "MCP_SERVER_URL": "http://localhost:3988/api/mcp/compliant",
+                "MCP_API_KEY": "your-api-key-here"
+            }
+        }
+    }
+}
